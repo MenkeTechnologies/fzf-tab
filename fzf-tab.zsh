@@ -17,10 +17,10 @@ source ${0:h}/lib/zsh-ls-colors/ls-colors.zsh fzf-tab-lscolors
 # thanks Valodim/zsh-capture-completion
 _fzf_tab_compadd() {
     # parse all options
-    local -A apre hpre dscrs _oad expl
+    local -A apre hpre dscrs _oad expl _mesg
     local -a isfile _opts __
     zparseopts -E -a _opts P:=apre p:=hpre d:=dscrs X:=expl O:=_oad A:=_oad D:=_oad f=isfile \
-               i: S: s: I: x: r: R: W: F: M+: E: q e Q n U C \
+               i: S: s: I: x:=_mesg r: R: W: F: M+: E: q e Q n U C \
                J:=__ V:=__ a=__ l=__ k=__ o=__ 1=__ 2=__
 
     # just delegate and leave if any of -O, -A or -D are given or fzf-tab is not enabled
@@ -38,6 +38,11 @@ _fzf_tab_compadd() {
     builtin compadd -A __hits -D __dscr "$@"
     local ret=$?
     if (( $#__hits == 0 )); then
+        # no matches: re-emit any explanation message (e.g. warnings) so it's
+        # still shown, since fzf-tab is about to bail out of this compadd call
+        if is-at-least 5.9 && (( $#_mesg != 0 )); then
+            builtin compadd -x $_mesg
+        fi
         return $ret
     fi
 
@@ -479,7 +484,6 @@ _fzf_tab_complete() {
 }
 
 fzf-tab-complete() {
-    enable-fzf-tab
     # this name must be ugly to avoid clashes
     local -i _fzf_tab_continue=1 _fzf_tab_ignored=0
     while (( _fzf_tab_continue )); do
@@ -502,9 +506,6 @@ fzf-tab-complete() {
           zle redisplay
         fi
     done
-
-    zstyle ':completion:*' list-grouped true
-    disable-fzf-tab
 }
 
 
@@ -536,7 +537,14 @@ enable-fzf-tab() {
     emulate -L zsh -o extended_glob
     (( ! $+_fzf_tab_orig_widget )) || disable-fzf-tab
 
-    typeset -g _fzf_tab_orig_widget=fzf-completion
+    # Prefer fzf's own completion widget when it's loaded (interactive setup),
+    # otherwise fall back to the builtin completion widget so completion still
+    # works when fzf-completion isn't present (e.g. the ztst test harness).
+    if (( $+widgets[fzf-completion] )); then
+        typeset -g _fzf_tab_orig_widget=fzf-completion
+    else
+        typeset -g _fzf_tab_orig_widget=expand-or-complete
+    fi
     if (( ! $+widgets[.fzf-tab-orig-$_fzf_tab_orig_widget] )); then
         # Widgets that get replaced by compinit.
         local compinit_widgets=(
@@ -569,6 +577,7 @@ enable-fzf-tab() {
 
     # make sure we can copy them
     autoload +X -Uz _main_complete _approximate
+    autoload -Uz is-at-least
 
     # hook compadd
     functions[compadd]=$functions[_fzf_tab_compadd]
@@ -628,6 +637,7 @@ build-fzf-tab-module() {
   fi
 }
 
+enable-fzf-tab
 zle -N toggle-fzf-tab
 
 # restore options
